@@ -66,6 +66,17 @@ func main() {
 	mg := mailgun.NewMailgun("mail.therileyjohnson.com", private, public)
 	initDb()
 
+	/* HELPER FUNCTIONS */
+	checkAuth := func(g *gin.Context, f func(*gin.Context)) {
+		if isActiveSession(g.Request) {
+			f(g)
+		} else {
+			players := users{}
+			queryPlayers(&players)
+			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
+		}
+	}
+
 	/* FILE HANDLERS */
 	r.GET("/static/css/:fi", static.Serve("/static/css", static.LocalFile("static/css/", true)))
 	r.GET("/static/img/:fi", static.Serve("/static/img", static.LocalFile("static/img/", true)))
@@ -83,6 +94,7 @@ func main() {
 			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
 		}
 	})
+
 	r.GET("/accept/:id", func(g *gin.Context) {
 		var ascore, iscore int
 		if isActiveSession(g.Request) {
@@ -117,8 +129,9 @@ func main() {
 			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
 		}
 	})
+
 	r.GET("/cancel/:id", func(g *gin.Context) {
-		if isActiveSession(g.Request) {
+		checkAuth(g, func(g *gin.Context) {
 			id := g.Param("id")
 			uid, _ := g.Request.Cookie("uuid")
 			db.Query("DELETE FROM PLAYER_SESSIONS WHERE initiator=$1 AND id=$2", uid.Value, id)
@@ -126,36 +139,27 @@ func main() {
 			getAcceptData(g.Request, &cd)
 			getInitiatData(g.Request, &cd)
 			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
-		} else {
-			players := users{}
-			queryPlayers(&players)
-			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
-		}
+		})
 	})
+
 	r.GET("/confirm", func(g *gin.Context) {
-		if isActiveSession(g.Request) {
+		checkAuth(g, func(g *gin.Context) {
 			cd := confirmData{}
 			getAcceptData(g.Request, &cd)
 			getInitiatData(g.Request, &cd)
 			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
-		} else {
-			players := users{}
-			queryPlayers(&players)
-			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
-		}
+		})
 	})
+
 	r.POST("/confirm", func(g *gin.Context) {
-		if isActiveSession(g.Request) {
+		checkAuth(g, func(g *gin.Context) {
 			cd := confirmData{}
 			getAcceptData(g.Request, &cd)
 			getInitiatData(g.Request, &cd)
-			tpl.ExecuteTemplate(g.Writer, "confirm.gohtml", cd)
-		} else {
-			players := users{}
-			queryPlayers(&players)
-			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
-		}
+			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
+		})
 	})
+
 	r.GET("/login", func(g *gin.Context) {
 		if isActiveSession(g.Request) {
 			tpl.ExecuteTemplate(g.Writer, "error.gohtml", "You're already logged in!")
@@ -163,6 +167,7 @@ func main() {
 			tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil)
 		}
 	})
+
 	r.POST("/login", func(g *gin.Context) {
 		email := strings.ToLower(g.PostForm("email"))
 		password := g.PostForm("password")
@@ -183,6 +188,7 @@ func main() {
 			}
 		}
 	})
+
 	r.GET("/logout", func(g *gin.Context) {
 		if isActiveSession(g.Request) {
 			uid := getUUID()
@@ -194,6 +200,7 @@ func main() {
 			tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil)
 		}
 	})
+
 	r.GET("/profile/:id", func(g *gin.Context) {
 		id := g.Param("id")
 		player := queryPlayer(id)
@@ -203,9 +210,11 @@ func main() {
 			tpl.ExecuteTemplate(g.Writer, "profileOut.gohtml", player)
 		}
 	})
+
 	r.GET("/register", func(g *gin.Context) {
 		tpl.ExecuteTemplate(g.Writer, "register.gohtml", nil)
 	})
+
 	r.POST("/register", func(g *gin.Context) {
 		matchEmail := false
 		emailDomains := []string{"trojans.dsu.edu", "pluto.dsu.edu", "dsu.edu"}
@@ -247,6 +256,7 @@ func main() {
 			tpl.ExecuteTemplate(g.Writer, "register.gohtml", "USER ALREADY EXISTS!")
 		}
 	})
+
 	r.GET("/register/:id", func(g *gin.Context) {
 		uc := user{}
 		err := db.QueryRow("SELECT email, fname, lname, password FROM PLAYER_CONFIRMATION WHERE uuid=$1", g.Param("id")).Scan(&uc.Email, &uc.Fname, &uc.Lname, &uc.Password)
