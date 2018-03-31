@@ -160,7 +160,7 @@ func main() {
 
 	r.POST("/confirm", func(g *gin.Context) {
 		checkAuth(g, func(g *gin.Context) {
-			addChallenge()
+			addChallenge(g)
 			cd := confirmData{}
 			err := getAcceptData(g.Request, &cd)
 			err = getInitiatData(g.Request, &cd)
@@ -219,16 +219,25 @@ func main() {
 	r.GET("/profile", func(g *gin.Context) {
 		checkAuth(g, func(g *gin.Context) {
 			id := getIDFromSession(g.Request)
-			player := queryPlayer(id)
-			tpl.ExecuteTemplate(g.Writer, "profileIn.gohtml", player)
+			player, err := queryPlayer(id)
+
+			if err != nil {
+				tpl.ExecuteTemplate(g.Writer, "error.gohtml", "Error fetching your profile, sorry")
+			}
+
+			tpl.ExecuteTemplate(g.Writer, "myProfile.gohtml", player)
 		})
 	})
 
 	r.GET("/profile/:id", func(g *gin.Context) {
 		id, err := strconv.ParseUint(g.Param("id"), 10, 32)
 		if err == nil {
-			player := queryPlayer(id)
-			if isActiveSession(g.Request) {
+			player, err := queryPlayer(id)
+			if err == sql.ErrNoRows {
+				tpl.ExecuteTemplate(g.Writer, "error.gohtml", "That player ID does not exist")
+			} else if err != nil {
+				tpl.ExecuteTemplate(g.Writer, "error.gohtml", "Error finding player with that ID")
+			} else if isActiveSession(g.Request) {
 				tpl.ExecuteTemplate(g.Writer, "profileIn.gohtml", player)
 			} else {
 				tpl.ExecuteTemplate(g.Writer, "profileOut.gohtml", player)
@@ -332,8 +341,36 @@ func dbConfig() map[string]string {
 	return conf
 }
 
-func addChallenge() {
+func addChallenge(c *gin.Context) error {
+	pid := getIDFromSession(c.Request)
+	oid, err := strconv.ParseUint(c.PostForm("pid"), 10, 32)
+	if err != nil {
+		return fmt.Errorf("Couldn't parse Opponent ID")
+	}
 
+	if pid == oid {
+		return fmt.Errorf("Challenger ID cannot be the same as the Acceptor ID")
+	}
+
+	wid, err := strconv.ParseUint(c.PostForm("wpid"), 10, 32)
+
+	if err != nil {
+		return fmt.Errorf("Couldn't parse Winner ID")
+	}
+
+	if wid != oid && wid != pid {
+		return fmt.Errorf("The Winner ID needs to either be the Challenger ID or Opponent ID")
+	}
+
+	date := c.PostForm("date")
+
+	_, err = db.Query("INSERT INTO PLAYER_challenges values ($1, $2, $3, $4, $5)", getUUID(), date, oid, pid, wid)
+
+	if err != nil {
+		return fmt.Errorf("Error with adding the challenge, please try again")
+	}
+
+	return nil
 }
 
 func getAcceptData(r *http.Request, cd *confirmData) error {
@@ -464,7 +501,7 @@ func queryPlayers(U *users) error {
 	return nil
 }
 
-func queryPlayer(id uint64) user {
+func queryPlayer(id uint64) (user, error) {
 	fmt.Println(id)
 	row, err := db.Query(`
 		SELECT 
@@ -472,7 +509,11 @@ func queryPlayer(id uint64) user {
 		FROM PLAYERS WHERE pid=$1`, id)
 
 	if err != nil {
-		return user{}
+		return user{}, err
+	}
+
+	if err == sql.ErrNoRows {
+		return user{}, sql.ErrNoRows
 	}
 
 	defer row.Close()
@@ -488,15 +529,10 @@ func queryPlayer(id uint64) user {
 	)
 
 	if err != nil {
-		return user{}
+		return user{}, err
 	}
 
-	if err != nil {
-		fmt.Println(err)
-		return user{}
-	}
-
-	return u
+	return u, nil
 }
 
 func addPlayer(e, f, l, p string) error {

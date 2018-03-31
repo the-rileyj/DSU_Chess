@@ -43,10 +43,17 @@
             </form>
             {{range .Achallenges}}
                 <div class="row">
-                    <div class="col">
+                    <div class="col-sm-6">
                         <form action="/accept/{{.ID}}" method="POST">
                             <button type="submit" class="btn btn-primary">
                                 Accept
+                            </button>
+                        </form>
+                    </div>
+                    <div class="col-sm-6">
+                        <form action="/deny/{{.ID}}" method="POST">
+                            <button type="submit" class="btn btn-primary">
+                                Deny
                             </button>
                         </form>
                     </div>
