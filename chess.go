@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -31,8 +32,9 @@ type challenge struct {
 }
 
 type confirmData struct {
-	Message, PID string
-	Challenges   []challenge
+	Message     string
+	Achallenges []challenge
+	Ichallenges []challenge
 }
 
 type session struct {
@@ -145,17 +147,28 @@ func main() {
 	r.GET("/confirm", func(g *gin.Context) {
 		checkAuth(g, func(g *gin.Context) {
 			cd := confirmData{}
-			getAcceptData(g.Request, &cd)
-			getInitiatData(g.Request, &cd)
+			err := getAcceptData(g.Request, &cd)
+			err = getInitiatData(g.Request, &cd)
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println(cd)
+			}
 			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
 		})
 	})
 
 	r.POST("/confirm", func(g *gin.Context) {
 		checkAuth(g, func(g *gin.Context) {
+			addChallenge()
 			cd := confirmData{}
-			getAcceptData(g.Request, &cd)
-			getInitiatData(g.Request, &cd)
+			err := getAcceptData(g.Request, &cd)
+			err = getInitiatData(g.Request, &cd)
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println(cd)
+			}
 			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
 		})
 	})
@@ -172,7 +185,7 @@ func main() {
 		email := strings.ToLower(g.PostForm("email"))
 		password := g.PostForm("password")
 		ua := userAuth{}
-		err := db.QueryRow("SELECT * FROM PLAYERS WHERE email=$1", email).Scan(&ua.Email, &ua.Fname, &ua.Lname, &ua.Password, &ua.ID, &ua.Score)
+		err := db.QueryRow("SELECT * FROM PLAYERS WHERE email=$1", email).Scan(&ua.Email, &ua.Fname, &ua.Lname, &ua.Password, &ua.Score, &ua.ID)
 		if err == sql.ErrNoRows {
 			tpl.ExecuteTemplate(g.Writer, "login.gohtml", "BAD LOGIN!")
 		} else {
@@ -191,23 +204,37 @@ func main() {
 
 	r.GET("/logout", func(g *gin.Context) {
 		if isActiveSession(g.Request) {
-			uid := getUUID()
-			db.Query("DELETE FROM PLAYER_SESSIONS WHERE uuid=$1", uid)
-			players := users{}
-			queryPlayers(&players)
-			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
+			val, _ := g.Request.Cookie("uuid")
+			http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", MaxAge: -1})
+			_, err := db.Query("DELETE FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value)
+			if err != nil {
+				fmt.Println(err)
+			}
+			g.Redirect(307, "/")
 		} else {
 			tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil)
 		}
 	})
 
-	r.GET("/profile/:id", func(g *gin.Context) {
-		id := g.Param("id")
-		player := queryPlayer(id)
-		if isActiveSession(g.Request) {
+	r.GET("/profile", func(g *gin.Context) {
+		checkAuth(g, func(g *gin.Context) {
+			id := getIDFromSession(g.Request)
+			player := queryPlayer(id)
 			tpl.ExecuteTemplate(g.Writer, "profileIn.gohtml", player)
+		})
+	})
+
+	r.GET("/profile/:id", func(g *gin.Context) {
+		id, err := strconv.ParseUint(g.Param("id"), 10, 32)
+		if err == nil {
+			player := queryPlayer(id)
+			if isActiveSession(g.Request) {
+				tpl.ExecuteTemplate(g.Writer, "profileIn.gohtml", player)
+			} else {
+				tpl.ExecuteTemplate(g.Writer, "profileOut.gohtml", player)
+			}
 		} else {
-			tpl.ExecuteTemplate(g.Writer, "profileOut.gohtml", player)
+			tpl.ExecuteTemplate(g.Writer, "error.gohtml", "That's not a valid player ID")
 		}
 	})
 
@@ -305,46 +332,20 @@ func dbConfig() map[string]string {
 	return conf
 }
 
-func getAcceptData(r *http.Request, cd *confirmData) {
-	pid, _ := r.Cookie("uuid")
-	rows, err := db.Query(`
-		SELECT
-		date, acceptor, initiator, id, winner
-		FROM PLAYER_CHALLENGES
-		ORDER WHERE acceptor=$1`, pid.Value)
+func addChallenge() {
 
-	if err != nil {
-		return
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		c := challenge{}
-		err = rows.Scan(
-			&c.Date,
-			&c.Acceptor,
-			&c.Initiator,
-			&c.ID,
-			&c.Winner,
-		)
-		if err != nil {
-			return
-		}
-		cd.Challenges = append(cd.Challenges, c)
-	}
 }
 
-func getInitiatData(r *http.Request, cd *confirmData) {
-	pid, _ := r.Cookie("uuid")
+func getAcceptData(r *http.Request, cd *confirmData) error {
+	pid := getIDFromSession(r)
 	rows, err := db.Query(`
 		SELECT
 		date, acceptor, initiator, id, winner
 		FROM PLAYER_CHALLENGES
-		ORDER WHERE acceptor=$1`, pid.Value)
+		WHERE acceptor=$1`, pid)
 
 	if err != nil {
-		return
+		return err
 	}
 
 	defer rows.Close()
@@ -359,10 +360,42 @@ func getInitiatData(r *http.Request, cd *confirmData) {
 			&c.Winner,
 		)
 		if err != nil {
-			return
+			return err
 		}
-		cd.Challenges = append(cd.Challenges, c)
+		cd.Achallenges = append(cd.Achallenges, c)
 	}
+	return nil
+}
+
+func getInitiatData(r *http.Request, cd *confirmData) error {
+	pid := getIDFromSession(r)
+	rows, err := db.Query(`
+		SELECT
+		date, acceptor, initiator, id, winner
+		FROM PLAYER_CHALLENGES
+		WHERE initiator=$1`, pid)
+
+	if err != nil {
+		return err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		c := challenge{}
+		err = rows.Scan(
+			&c.Date,
+			&c.Acceptor,
+			&c.Initiator,
+			&c.ID,
+			&c.Winner,
+		)
+		if err != nil {
+			return err
+		}
+		cd.Ichallenges = append(cd.Ichallenges, c)
+	}
+	return nil
 }
 
 func isActiveSession(r *http.Request) bool {
@@ -371,10 +404,10 @@ func isActiveSession(r *http.Request) bool {
 	return err == nil && db.QueryRow("SELECT pid FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value).Scan(&id) != sql.ErrNoRows
 }
 
-func getIDFromSession(r *http.Request) int {
-	var id int
+func getIDFromSession(r *http.Request) uint64 {
+	var id uint64
 	val, _ := r.Cookie("uuid")
-	db.QueryRow("SELECT pid FROM PLAYER_SESSIONS WHERE uuid=$1", val).Scan(&id)
+	db.QueryRow("SELECT pid FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value).Scan(&id)
 	return id
 }
 
@@ -431,7 +464,7 @@ func queryPlayers(U *users) error {
 	return nil
 }
 
-func queryPlayer(id string) user {
+func queryPlayer(id uint64) user {
 	fmt.Println(id)
 	row, err := db.Query(`
 		SELECT 
@@ -445,17 +478,17 @@ func queryPlayer(id string) user {
 	defer row.Close()
 
 	u := user{}
-	for row.Next() {
-		err = row.Scan(
-			&u.Email,
-			&u.Fname,
-			&u.Lname,
-			&u.ID,
-			&u.Score,
-		)
-		if err != nil {
-			return user{}
-		}
+	row.Next()
+	err = row.Scan(
+		&u.Email,
+		&u.Fname,
+		&u.Lname,
+		&u.ID,
+		&u.Score,
+	)
+
+	if err != nil {
+		return user{}
 	}
 
 	if err != nil {

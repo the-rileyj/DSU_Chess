@@ -41,29 +41,27 @@
                     </div>
                 </div>
             </form>
-            {{$id := .PID}}
-            {{range .Challenges}}
-                {{if eq $id .Acceptor}}
-                    <div class="row">
-                        <div class="col">
-                            <form action="/accept/{{.ID}}" method="POST">
-                                <button type="submit" class="btn btn-primary">
-                                    Accept
-                                </button>
-                            </form>
-                        </div>
+            {{range .Achallenges}}
+                <div class="row">
+                    <div class="col">
+                        <form action="/accept/{{.ID}}" method="POST">
+                            <button type="submit" class="btn btn-primary">
+                                Accept
+                            </button>
+                        </form>
                     </div>
-                {{else}}
-                    <div class="row">
-                        <div class="col">
-                            <form action="/cancel/{{.ID}}" method="POST">
-                                <button type="submit" class="btn btn-primary">
-                                    Cancel
-                                </button>
-                            </form>
-                        </div>
+                </div>
+            {{end}}
+            {{range .Ichallenges}}
+                <div class="row">
+                    <div class="col">
+                        <form action="/cancel/{{.ID}}" method="POST">
+                            <button type="submit" class="btn btn-primary">
+                                Cancel
+                            </button>
+                        </form>
                     </div>
-                {{end}}
+                </div>
             {{end}}
             {{template "js"}}
         </div>
