@@ -28,11 +28,14 @@ const (
 )
 
 type challenge struct {
-	Acceptor, Date, ID, Initiator, Winner string
+	Acceptor, Date, ID, Initiator, Winner, WinningString string
+	Opponent                                             struct {
+		Fname, Lname string
+	}
 }
 
 type confirmData struct {
-	Message     string
+	Error       string
 	Achallenges []challenge
 	Ichallenges []challenge
 }
@@ -69,13 +72,13 @@ func main() {
 	initDb()
 
 	/* HELPER FUNCTIONS */
-	checkAuth := func(g *gin.Context, f func(*gin.Context)) {
-		if isActiveSession(g.Request) {
-			f(g)
+	checkAuth := func(c *gin.Context, f func(*gin.Context)) {
+		if isActiveSession(c.Request) {
+			f(c)
 		} else {
 			players := users{}
 			queryPlayers(&players)
-			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
+			tpl.ExecuteTemplate(c.Writer, "indexOut.gohtml", players)
 		}
 	}
 
@@ -97,9 +100,9 @@ func main() {
 		}
 	})
 
-	r.GET("/accept/:id", func(g *gin.Context) {
-		var ascore, iscore int
-		if isActiveSession(g.Request) {
+	r.POST("/accept/:id", func(c *gin.Context) {
+		checkAuth(c, func(g *gin.Context) {
+			var ascore, iscore int
 			id := g.Param("id")
 			uid, _ := g.Request.Cookie("uuid")
 			c := challenge{}
@@ -125,51 +128,41 @@ func main() {
 			getAcceptData(g.Request, &cd)
 			getInitiatData(g.Request, &cd)
 			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
-		} else {
-			players := users{}
-			queryPlayers(&players)
-			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
-		}
+		})
 	})
 
-	r.GET("/cancel/:id", func(g *gin.Context) {
-		checkAuth(g, func(g *gin.Context) {
+	r.POST("/cancel/:id", func(c *gin.Context) {
+		checkAuth(c, func(g *gin.Context) {
 			id := g.Param("id")
-			uid, _ := g.Request.Cookie("uuid")
-			db.Query("DELETE FROM PLAYER_SESSIONS WHERE initiator=$1 AND id=$2", uid.Value, id)
-			cd := confirmData{}
-			getAcceptData(g.Request, &cd)
-			getInitiatData(g.Request, &cd)
-			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
+			uid := getIDFromSession(g.Request)
+			db.Query("DELETE FROM PLAYER_CHALLENGES WHERE initiator=$1 AND id=$2", uid, id)
+			g.Redirect(303, "/confirm")
 		})
 	})
 
-	r.GET("/confirm", func(g *gin.Context) {
-		checkAuth(g, func(g *gin.Context) {
-			cd := confirmData{}
-			err := getAcceptData(g.Request, &cd)
-			err = getInitiatData(g.Request, &cd)
-			if err != nil {
-				fmt.Println(err)
-			} else {
-				fmt.Println(cd)
-			}
-			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
+	r.GET("/confirm", func(c *gin.Context) {
+		checkAuth(c, func(g *gin.Context) {
+			renderGameConfirmation(g)
 		})
 	})
 
-	r.POST("/confirm", func(g *gin.Context) {
-		checkAuth(g, func(g *gin.Context) {
-			addChallenge(g)
-			cd := confirmData{}
-			err := getAcceptData(g.Request, &cd)
-			err = getInitiatData(g.Request, &cd)
+	r.POST("/confirm", func(c *gin.Context) {
+		checkAuth(c, func(g *gin.Context) {
+			err := addChallenge(g)
 			if err != nil {
-				fmt.Println(err)
+				tpl.ExecuteTemplate(g.Writer, "error.gohtml", err.Error())
 			} else {
-				fmt.Println(cd)
+				g.Redirect(303, "/confirm")
 			}
-			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
+		})
+	})
+
+	r.POST("/deny/:id", func(c *gin.Context) {
+		checkAuth(c, func(g *gin.Context) {
+			id := g.Param("id")
+			uid := getIDFromSession(g.Request)
+			db.Query("DELETE FROM PLAYER_CHALLENGES WHERE acceptor=$1 AND id=$2", uid, id)
+			g.Redirect(303, "/confirm")
 		})
 	})
 
@@ -216,8 +209,8 @@ func main() {
 		}
 	})
 
-	r.GET("/profile", func(g *gin.Context) {
-		checkAuth(g, func(g *gin.Context) {
+	r.GET("/profile", func(c *gin.Context) {
+		checkAuth(c, func(g *gin.Context) {
 			id := getIDFromSession(g.Request)
 			player, err := queryPlayer(id)
 
@@ -364,6 +357,12 @@ func addChallenge(c *gin.Context) error {
 
 	date := c.PostForm("date")
 
+	_, err = queryPlayer(oid)
+
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("An Opponent with that ID does not exist")
+	}
+
 	_, err = db.Query("INSERT INTO PLAYER_challenges values ($1, $2, $3, $4, $5)", getUUID(), date, oid, pid, wid)
 
 	if err != nil {
@@ -501,8 +500,84 @@ func queryPlayers(U *users) error {
 	return nil
 }
 
+func renderGameConfirmation(g *gin.Context) {
+	type info struct{ Fname, Lname string }
+	pmap := make(map[string]info)
+	cd := confirmData{}
+
+	pid := getIDFromSession(g.Request)
+
+	rows, err := db.Query(`SELECT * FROM PLAYER_CHALLENGES WHERE acceptor=$1`, pid)
+
+	if err == nil {
+		for rows.Next() && cd.Error == "" {
+			c := challenge{}
+			err = rows.Scan(
+				&c.ID,
+				&c.Date,
+				&c.Acceptor,
+				&c.Initiator,
+				&c.Winner,
+			)
+			if err != nil {
+				cd.Error = "Error in getting acceptor data"
+			} else {
+				if _, exists := pmap[c.Initiator]; !exists {
+					oid, _ := strconv.ParseUint(c.Initiator, 10, 32)
+					u, _ := queryPlayer(oid)
+					pmap[c.Initiator] = info{u.Fname, u.Lname}
+				}
+				c.Opponent.Fname, c.Opponent.Lname = pmap[c.Initiator].Fname, pmap[c.Initiator].Lname
+				if c.Initiator == c.Winner {
+					c.WinningString = "won on"
+				} else {
+					c.WinningString = "lost on"
+				}
+				cd.Achallenges = append(cd.Achallenges, c)
+			}
+		}
+		rows.Close()
+
+		if err == nil {
+			rows, err = db.Query(`SELECT * FROM PLAYER_CHALLENGES WHERE initiator=$1`, pid)
+			if err == nil {
+				for rows.Next() && cd.Error == "" {
+					c := challenge{}
+					err = rows.Scan(
+						&c.ID,
+						&c.Date,
+						&c.Acceptor,
+						&c.Initiator,
+						&c.Winner,
+					)
+					if err != nil {
+						cd.Error = "Error in getting acceptor data"
+					} else {
+						if _, exists := pmap[c.Acceptor]; !exists {
+							oid, _ := strconv.ParseUint(c.Acceptor, 10, 32)
+							u, _ := queryPlayer(oid)
+							pmap[c.Acceptor] = info{u.Fname, u.Lname}
+						}
+						c.Opponent.Fname, c.Opponent.Lname = pmap[c.Acceptor].Fname, pmap[c.Acceptor].Lname
+						if c.Acceptor == c.Winner {
+							c.WinningString = "won on"
+						} else {
+							c.WinningString = "lost on"
+						}
+						cd.Ichallenges = append(cd.Ichallenges, c)
+					}
+				}
+				rows.Close()
+			}
+		}
+	} else {
+		cd.Error = "Could not get acceptor data"
+	}
+
+	tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
+}
+
 func queryPlayer(id uint64) (user, error) {
-	fmt.Println(id)
 	row, err := db.Query(`
 		SELECT 
 		email, fname, lname, pid, score 

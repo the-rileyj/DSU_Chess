@@ -3,7 +3,7 @@
     <body>
         {{template "navIn"}}
         <div class="container-fluid" style="padding: 0 1rem 0 0">
-            {{if .Message}}
+            {{if .Error}}
                 <div class="text-center">
                     <h1 style="color: red">{{.}}</h1>
                 </div>
@@ -41,34 +41,42 @@
                     </div>
                 </div>
             </form>
-            {{range .Achallenges}}
-                <div class="row">
-                    <div class="col-sm-6">
-                        <form action="/accept/{{.ID}}" method="POST">
-                            <button type="submit" class="btn btn-primary">
-                                Accept
-                            </button>
-                        </form>
+            {{ if not .Error }}
+                {{range .Achallenges}}
+                    <div class="row">
+                        <div class="col-sm-8">
+                            <a href="/profile/{{.Initiator}}">{{.Opponent.Fname}} {{.Opponent.Lname}}</a> {{.WinningString}} {{.Date}}
+                        </div>
+                        <div class="col-sm-2">
+                            <form action="/accept/{{.ID}}" method="POST">
+                                <button type="submit" class="btn btn-primary">
+                                    Accept
+                                </button>
+                            </form>
+                        </div>
+                        <div class="col-sm-2">
+                            <form action="/deny/{{.ID}}" method="POST">
+                                <button type="submit" class="btn btn-primary">
+                                    Deny
+                                </button>
+                            </form>
+                        </div>
                     </div>
-                    <div class="col-sm-6">
-                        <form action="/deny/{{.ID}}" method="POST">
-                            <button type="submit" class="btn btn-primary">
-                                Deny
-                            </button>
-                        </form>
+                {{end}}
+                {{range .Ichallenges}}
+                    <div class="row">
+                        <div class="col-sm-10">
+                            <a href="/profile/{{.Acceptor}}">{{.Opponent.Fname}} {{.Opponent.Lname}}</a> {{.WinningString}} {{.Date}}
+                        </div>
+                        <div class="col-sm-2">
+                            <form action="/cancel/{{.ID}}" method="POST">
+                                <button type="submit" class="btn btn-primary">
+                                    Cancel
+                                </button>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            {{end}}
-            {{range .Ichallenges}}
-                <div class="row">
-                    <div class="col">
-                        <form action="/cancel/{{.ID}}" method="POST">
-                            <button type="submit" class="btn btn-primary">
-                                Cancel
-                            </button>
-                        </form>
-                    </div>
-                </div>
+                {{end}}
             {{end}}
             {{template "js"}}
         </div>
