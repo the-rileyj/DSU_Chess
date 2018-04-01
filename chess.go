@@ -107,8 +107,8 @@ func main() {
 			uid, _ := g.Request.Cookie("uuid")
 			c := challenge{}
 
-			db.QueryRow(`SELECT date, acceptor, initiator, id, winner FROM PLAYER_CHALLENGES
-				ORDER WHERE acceptor=$1 AND id=$2`, uid.Value, id).Scan(&c.Date, &c.Acceptor, &c.Initiator, &c.ID, &c.Winner)
+			db.QueryRow(`SELECT * FROM PLAYER_CHALLENGES
+				ORDER WHERE acceptor=$1 AND id=$2`, uid.Value, id).Scan(&c.ID, &c.Date, &c.Acceptor, &c.Initiator, &c.Winner)
 			db.QueryRow(`SELECT score FROM PLAYERS
 					ORDER WHERE uuid=$2`, c.Initiator).Scan(&iscore)
 			db.QueryRow(`SELECT score FROM PLAYERS
@@ -135,7 +135,12 @@ func main() {
 		checkAuth(c, func(g *gin.Context) {
 			id := g.Param("id")
 			uid := getIDFromSession(g.Request)
-			db.Query("DELETE FROM PLAYER_CHALLENGES WHERE initiator=$1 AND id=$2", uid, id)
+			_, err := db.Exec("DELETE FROM PLAYER_CHALLENGES WHERE initiator=$1 AND id=$2", uid, id)
+
+			if err != nil {
+				fmt.Println(c.Request.URL, err)
+			}
+
 			g.Redirect(303, "/confirm")
 		})
 	})
@@ -161,7 +166,12 @@ func main() {
 		checkAuth(c, func(g *gin.Context) {
 			id := g.Param("id")
 			uid := getIDFromSession(g.Request)
-			db.Query("DELETE FROM PLAYER_CHALLENGES WHERE acceptor=$1 AND id=$2", uid, id)
+			_, err := db.Exec("DELETE FROM PLAYER_CHALLENGES WHERE acceptor=$1 AND id=$2", uid, id)
+
+			if err != nil {
+				fmt.Println(c.Request.URL, err)
+			}
+
 			g.Redirect(303, "/confirm")
 		})
 	})
@@ -201,7 +211,7 @@ func main() {
 			http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", MaxAge: -1})
 			_, err := db.Query("DELETE FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value)
 			if err != nil {
-				fmt.Println(err)
+				fmt.Println(g.Request.URL, err)
 			}
 			g.Redirect(307, "/")
 		} else {
@@ -256,49 +266,64 @@ func main() {
 		}
 		if !matchEmail {
 			tpl.ExecuteTemplate(g.Writer, "register.gohtml", "EMAIL FORMAT IS INVALID!")
-			return
-		}
-		fname := g.PostForm("fname")
-		lname := g.PostForm("lname")
-		password := g.PostForm("password")
-		cpassword := g.PostForm("cpassword")
-		if cpassword != password {
-			tpl.ExecuteTemplate(g.Writer, "register.gohtml", "PASSWORDS DO NOT MATCH!")
-			return
-		}
-		ua := userAuth{}
-		err := db.QueryRow("SELECT * FROM PLAYERS WHERE email=$1", email).Scan(&ua.Email)
-		fmt.Println(err)
-		if err == sql.ErrNoRows {
-			var hpassword string
-			for hpassword, err = hashPassword(password); err != nil; {
-				hpassword, err = hashPassword(password)
-			}
-			uid := getUUID()
-			db.Query("INSERT INTO PLAYER_CONFIRMATION (uuid, email, fname, lname, password) VALUES ($1, $2, $3, $4, $5)", uid, email, fname, lname, hpassword)
-			_, _, err = mg.Send(mailgun.NewMessage("robot@mail.therileyjohnson.com", "Registration", fmt.Sprintf("Click %s:4800/register/%s to confirm your email!", url, uid), email))
-			if err != nil {
-				fmt.Println(err)
-			}
-			tpl.ExecuteTemplate(g.Writer, "registerFinish.gohtml", nil)
 		} else {
-			tpl.ExecuteTemplate(g.Writer, "register.gohtml", "USER ALREADY EXISTS!")
+			fname := g.PostForm("fname")
+			lname := g.PostForm("lname")
+			password := g.PostForm("password")
+			cpassword := g.PostForm("cpassword")
+			if cpassword != password {
+				tpl.ExecuteTemplate(g.Writer, "register.gohtml", "PASSWORDS DO NOT MATCH!")
+			} else {
+				ua := userAuth{}
+				err := db.QueryRow("SELECT email FROM PLAYERS WHERE email=$1", email).Scan(&ua.Email)
+
+				if err != sql.ErrNoRows {
+					tpl.ExecuteTemplate(g.Writer, "register.gohtml", "USER ALREADY EXISTS!")
+				} else {
+					if err != nil {
+						fmt.Println(g.Request.URL, err)
+					}
+
+					var hpassword string
+					for hpassword, err = hashPassword(password); err != nil; {
+						hpassword, err = hashPassword(password)
+					}
+
+					uid := getUUID()
+					_, err = db.Exec("INSERT INTO PLAYER_CONFIRMATION VALUES ($1, $2, $3, $4, $5)",
+						uid, email, fname, lname, hpassword)
+					if err != nil {
+						fmt.Println(g.Request.URL, err)
+						tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with adding to registration pool, try again; if the problem persists, you know who to talk to")
+					} else {
+						_, _, err = mg.Send(mailgun.NewMessage("robot@mail.therileyjohnson.com", "Registration", fmt.Sprintf("Click %s:4800/register/%s to confirm your email!", url, uid), email))
+						if err != nil {
+							fmt.Println(g.Request.URL, err)
+							tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with sending confirmation email for registration, try again; if the problem persists, you know who to talk to")
+						} else {
+							tpl.ExecuteTemplate(g.Writer, "registerFinishOut.gohtml", "Please confirm your email to finish registration")
+						}
+					}
+				}
+			}
 		}
 	})
 
 	r.GET("/register/:id", func(g *gin.Context) {
-		uc := user{}
-		err := db.QueryRow("SELECT email, fname, lname, password FROM PLAYER_CONFIRMATION WHERE uuid=$1", g.Param("id")).Scan(&uc.Email, &uc.Fname, &uc.Lname, &uc.Password)
+		u := user{}
+		err := db.QueryRow(`SELECT email, fname, lname, password FROM PLAYER_CONFIRMATION WHERE uuid=$1`,
+			g.Param("id")).Scan(&u.Email, &u.Fname, &u.Lname, &u.Password)
 		if err == sql.ErrNoRows {
 			tpl.ExecuteTemplate(g.Writer, "registrationBad.gohtml", nil)
-			return
+		} else {
+			go db.Exec(`DELETE FROM PLAYER_CONFIRMATION WHERE email=$1`, u.Email)
+			addPlayer(u.Email, u.Fname, u.Lname, u.Password)
+			db.QueryRow(`SELECT pid FROM PLAYERS WHERE email=$1`, u.Email).Scan(&u.ID)
+			uid := getUUID()
+			go db.Exec(`INSERT INTO PLAYER_SESSIONS VALUES ($1, $2)`, u.ID, uid)
+			http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", Value: uid})
+			tpl.ExecuteTemplate(g.Writer, "registerFinishIn.gohtml", "You have finished registration!")
 		}
-		addPlayer(uc.Email, uc.Fname, uc.Lname, uc.Password)
-		db.Query("DELETE FROM PLAYER_CONFIRMATION WHERE email=$1", uc.Email)
-		uid := getUUID()
-		http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", Value: uid})
-		db.Query("INSERT INTO PLAYER_CONFIRMATION (pid, uuid) VALUES ($1, $2)", uc.ID, uid)
-		tpl.ExecuteTemplate(g.Writer, "registration.gohtml", nil)
 	})
 
 	r.Run(":4800")
@@ -363,7 +388,7 @@ func addChallenge(c *gin.Context) error {
 		return fmt.Errorf("An Opponent with that ID does not exist")
 	}
 
-	_, err = db.Query("INSERT INTO PLAYER_challenges values ($1, $2, $3, $4, $5)", getUUID(), date, oid, pid, wid)
+	_, err = db.Exec("INSERT INTO PLAYER_CHALLENGES VALUES ($1, $2, $3, $4, $5)", getUUID(), date, oid, pid, wid)
 
 	if err != nil {
 		return fmt.Errorf("Error with adding the challenge, please try again")
@@ -578,30 +603,18 @@ func renderGameConfirmation(g *gin.Context) {
 }
 
 func queryPlayer(id uint64) (user, error) {
-	row, err := db.Query(`
+	row := db.QueryRow(`
 		SELECT 
 		email, fname, lname, pid, score 
 		FROM PLAYERS WHERE pid=$1`, id)
 
-	if err != nil {
-		return user{}, err
-	}
+	u := user{}
+
+	err := row.Scan(&u.Email, &u.Fname, &u.Lname, &u.ID, &u.Score)
 
 	if err == sql.ErrNoRows {
 		return user{}, sql.ErrNoRows
 	}
-
-	defer row.Close()
-
-	u := user{}
-	row.Next()
-	err = row.Scan(
-		&u.Email,
-		&u.Fname,
-		&u.Lname,
-		&u.ID,
-		&u.Score,
-	)
 
 	if err != nil {
 		return user{}, err
@@ -611,8 +624,7 @@ func queryPlayer(id uint64) (user, error) {
 }
 
 func addPlayer(e, f, l, p string) error {
-	_, err := db.Exec(`INSERT INTO PLAYERS (email, fname, lname, password, score) 
-	VALUES ($1, $2, $3, $4, 300)`, e, f, l, p)
+	_, err := db.Exec(`INSERT INTO PLAYERS VALUES ($1, $2, $3, $4, 300)`, e, f, l, p)
 
 	if err != nil {
 		return err
