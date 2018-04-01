@@ -59,13 +59,17 @@ type users struct {
 	Users []user
 }
 
-var tpl *template.Template
+var mg *mailgun.Mailgun
 var db *sql.DB
+var tpl *template.Template
 
 func main() {
-	url := "http://localhost"
+	url := "http://localhost" //FIND AND CHANGE WHEN GOING INTO PRODUCTION (HINT, USED IN CONJUCTION WITH MAILGUN MAIL)
+	fmt.Println(url)          /*THIS REDUNTANT LINE IS TO STRESS HOW IMPORTANT IT IS TO CHANGE THIS WHEN GOING INTO PRODUCTION */
+
 	r := gin.Default()
 	tpl = template.Must(template.New("").ParseGlob("data/templates/*.gohtml"))
+
 	private, _ := os.LookupEnv("PRIVATE")
 	public, _ := os.LookupEnv("PUBLIC")
 	mg := mailgun.NewMailgun("mail.therileyjohnson.com", private, public)
@@ -92,11 +96,18 @@ func main() {
 	/* ROUTE HANDLERS */
 	r.GET("/", func(g *gin.Context) {
 		players := users{}
-		queryPlayers(&players)
+		err := queryPlayers(&players)
+		if err != nil {
+			errorBasicLogger(g.Request.URL, "1", err)
+			err = nil
+		}
+
 		if isActiveSession(g.Request) {
-			tpl.ExecuteTemplate(g.Writer, "indexIn.gohtml", players)
+			err = tpl.ExecuteTemplate(g.Writer, "indexIn.gohtml", players)
+			errorLogger(g.Request.URL, "2", err)
 		} else {
-			tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
+			err = tpl.ExecuteTemplate(g.Writer, "indexOut.gohtml", players)
+			errorLogger(g.Request.URL, "3", err)
 		}
 	})
 
@@ -104,30 +115,51 @@ func main() {
 		checkAuth(c, func(g *gin.Context) {
 			var ascore, iscore int
 			id := g.Param("id")
-			uid, _ := g.Request.Cookie("uuid")
+			uid := getIDFromSession(g.Request)
 			c := challenge{}
 
-			db.QueryRow(`SELECT * FROM PLAYER_CHALLENGES
-				ORDER WHERE acceptor=$1 AND id=$2`, uid.Value, id).Scan(&c.ID, &c.Date, &c.Acceptor, &c.Initiator, &c.Winner)
-			db.QueryRow(`SELECT score FROM PLAYERS
-					ORDER WHERE uuid=$2`, c.Initiator).Scan(&iscore)
-			db.QueryRow(`SELECT score FROM PLAYERS
-				ORDER WHERE uuid=$2`, c.Initiator).Scan(&iscore)
+			err := db.QueryRow(
+				`SELECT * FROM PLAYER_CHALLENGES WHERE acceptor=$1 AND id=$2`, uid, id,
+			).Scan(
+				&c.ID, &c.Date, &c.Acceptor, &c.Initiator, &c.Winner,
+			)
 
-			if c.Winner == c.Initiator {
-				db.Query("UPDATE films SET score=$1 WHERE uuid=$2", ascore-1, c.Acceptor)
-				db.Query("UPDATE films SET score=$1 WHERE uuid=$2", iscore+1, c.Initiator)
+			if err == sql.ErrNoRows {
+				errorLogger(g.Request.URL, "1", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "Couldn't find that challenge, sorry"))
 			} else {
-				db.Query("UPDATE films SET score=$1 WHERE uuid=$2", ascore+1, c.Acceptor)
-				db.Query("UPDATE films SET score=$1 WHERE uuid=$2", iscore-1, c.Initiator)
+				errorLogger(g.Request.URL, "2", err)
+
+				err = db.QueryRow(
+					`SELECT score FROM PLAYERS WHERE pid=$1`, c.Acceptor,
+				).Scan(&ascore)
+				errorLogger(g.Request.URL, "3", err)
+
+				err = db.QueryRow(
+					`SELECT score FROM PLAYERS WHERE pid=$1`, c.Initiator,
+				).Scan(&iscore)
+				errorLogger(g.Request.URL, "4", err)
+
+				if c.Winner == c.Initiator {
+					_, err = db.Exec("UPDATE PLAYERS SET score=$1 WHERE pid=$2", ascore-1, c.Acceptor)
+					errorLogger(g.Request.URL, "5", err)
+
+					_, err = db.Exec("UPDATE PLAYERS SET score=$1 WHERE pid=$2", iscore+1, c.Initiator)
+
+					errorLogger(g.Request.URL, "6", err)
+				} else {
+					_, err = db.Exec("UPDATE PLAYERS SET score=$1 WHERE pid=$2", ascore+1, c.Acceptor)
+					errorLogger(g.Request.URL, "7", err)
+
+					_, err = db.Exec("UPDATE PLAYERS SET score=$1 WHERE pid=$2", iscore-1, c.Initiator)
+					errorLogger(g.Request.URL, "8", err)
+
+				}
+
+				_, err = db.Exec("DELETE FROM PLAYER_CHALLENGES WHERE acceptor=$1 AND id=$2", uid, id)
+				errorLogger(g.Request.URL, "9", err)
+
+				g.Redirect(303, "/confirm")
 			}
-
-			db.Query("DELETE FROM PLAYER_CHALLENGES WHERE acceptor=$1 AND id=$2", uid.Value, id)
-
-			cd := confirmData{}
-			getAcceptData(g.Request, &cd)
-			getInitiatData(g.Request, &cd)
-			tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd)
 		})
 	})
 
@@ -137,9 +169,7 @@ func main() {
 			uid := getIDFromSession(g.Request)
 			_, err := db.Exec("DELETE FROM PLAYER_CHALLENGES WHERE initiator=$1 AND id=$2", uid, id)
 
-			if err != nil {
-				fmt.Println(c.Request.URL, err)
-			}
+			errorLogger(c.Request.URL, "1", err)
 
 			g.Redirect(303, "/confirm")
 		})
@@ -155,6 +185,7 @@ func main() {
 		checkAuth(c, func(g *gin.Context) {
 			err := addChallenge(g)
 			if err != nil {
+				errorBasicLogger(g.Request.URL, "1", err)
 				tpl.ExecuteTemplate(g.Writer, "error.gohtml", err.Error())
 			} else {
 				g.Redirect(303, "/confirm")
@@ -168,9 +199,7 @@ func main() {
 			uid := getIDFromSession(g.Request)
 			_, err := db.Exec("DELETE FROM PLAYER_CHALLENGES WHERE acceptor=$1 AND id=$2", uid, id)
 
-			if err != nil {
-				fmt.Println(c.Request.URL, err)
-			}
+			errorLogger(g.Request.URL, "1", err)
 
 			g.Redirect(303, "/confirm")
 		})
@@ -210,9 +239,7 @@ func main() {
 			val, _ := g.Request.Cookie("uuid")
 			http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", MaxAge: -1})
 			_, err := db.Query("DELETE FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value)
-			if err != nil {
-				fmt.Println(g.Request.URL, err)
-			}
+			errorLogger(g.Request.URL, "", err)
 			g.Redirect(307, "/")
 		} else {
 			tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil)
@@ -278,11 +305,9 @@ func main() {
 				err := db.QueryRow("SELECT email FROM PLAYERS WHERE email=$1", email).Scan(&ua.Email)
 
 				if err != sql.ErrNoRows {
-					tpl.ExecuteTemplate(g.Writer, "register.gohtml", "USER ALREADY EXISTS!")
+					errorLogger(g.Request.URL, "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "USER ALREADY EXISTS!"))
 				} else {
-					if err != nil {
-						fmt.Println(g.Request.URL, err)
-					}
+					errorLogger(g.Request.URL, "", err)
 
 					var hpassword string
 					for hpassword, err = hashPassword(password); err != nil; {
@@ -293,15 +318,15 @@ func main() {
 					_, err = db.Exec("INSERT INTO PLAYER_CONFIRMATION VALUES ($1, $2, $3, $4, $5)",
 						uid, email, fname, lname, hpassword)
 					if err != nil {
-						fmt.Println(g.Request.URL, err)
-						tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with adding to registration pool, try again; if the problem persists, you know who to talk to")
+						errorBasicLogger(g.Request.URL, "", err)
+						errorLogger(g.Request.URL, "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with adding to registration pool, try again; if the problem persists, you know who to talk to"))
 					} else {
-						_, _, err = mg.Send(mailgun.NewMessage("robot@mail.therileyjohnson.com", "Registration", fmt.Sprintf("Click %s:4800/register/%s to confirm your email!", url, uid), email))
+						_, _, err = mg.Send(mailgun.NewMessage("robot@mail.therileyjohnson.com", "Registration", fmt.Sprintf("Click %s:4800/register/%s to confirm your email!", "http://localhost", uid), email))
 						if err != nil {
-							fmt.Println(g.Request.URL, err)
-							tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with sending confirmation email for registration, try again; if the problem persists, you know who to talk to")
+							errorBasicLogger(g.Request.URL, "", err)
+							errorLogger(g.Request.URL, "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with sending confirmation email for registration, try again; if the problem persists, you know who to talk to"))
 						} else {
-							tpl.ExecuteTemplate(g.Writer, "registerFinishOut.gohtml", "Please confirm your email to finish registration")
+							errorLogger(g.Request.URL, "", tpl.ExecuteTemplate(g.Writer, "registerFinishOut.gohtml", "Please confirm your email to finish registration"))
 						}
 					}
 				}
@@ -395,6 +420,16 @@ func addChallenge(c *gin.Context) error {
 	}
 
 	return nil
+}
+
+func errorBasicLogger(location interface{}, sublocation string, err error) {
+	fmt.Println(location, sublocation, err.Error())
+}
+
+func errorLogger(location interface{}, sublocation string, err error) {
+	if err != nil {
+		errorBasicLogger(location, sublocation, err)
+	}
 }
 
 func getAcceptData(r *http.Request, cd *confirmData) error {
