@@ -199,7 +199,7 @@ func main() {
 			pmap := make(map[string]info)
 
 			rows, err := db.Query(`SELECT * FROM PLAYER_CHALLENGES WHERE acceptor=$1`, pid)
-			go errorLogger(g.Request.URL.String(), "", err)
+			go errorLogger(g.Request.URL.String(), "1", err)
 			if err == nil {
 				for rows.Next() && cd.Error == "" {
 					c = challenge{}
@@ -213,13 +213,13 @@ func main() {
 
 					if err != nil {
 						cd.Error = "Error in getting acceptor data"
-						go errorLogger(g.Request.URL.String(), "", err)
+						go errorLogger(g.Request.URL.String(), "2", err)
 					} else {
 						if _, exists := pmap[c.Initiator]; !exists {
 							oid, err = strconv.ParseUint(c.Initiator, 10, 32)
-							go errorLogger(g.Request.URL.String(), "", err)
+							go errorLogger(g.Request.URL.String(), "3", err)
 							u, err = queryPlayer(oid)
-							go errorLogger(g.Request.URL.String(), "", err)
+							go errorLogger(g.Request.URL.String(), "4", err)
 							pmap[c.Initiator] = info{u.Fname, u.Lname}
 						}
 
@@ -251,13 +251,13 @@ func main() {
 
 							if err != nil {
 								cd.Error = "Error in getting acceptor data"
-								go errorLogger(g.Request.URL.String(), "", err)
+								go errorLogger(g.Request.URL.String(), "5", err)
 							} else {
 								if _, exists := pmap[c.Acceptor]; !exists {
 									oid, err = strconv.ParseUint(c.Acceptor, 10, 32)
-									go errorLogger(g.Request.URL.String(), "", err)
+									go errorLogger(g.Request.URL.String(), "6", err)
 									u, err = queryPlayer(oid)
-									go errorLogger(g.Request.URL.String(), "", err)
+									go errorLogger(g.Request.URL.String(), "7", err)
 									pmap[c.Acceptor] = info{u.Fname, u.Lname}
 								}
 
@@ -273,19 +273,19 @@ func main() {
 							}
 						}
 					} else {
-						go errorLogger(g.Request.URL.String(), "", err)
+						go errorLogger(g.Request.URL.String(), "8", err)
 					}
 					rows.Close()
 				} else {
-					go errorLogger(g.Request.URL.String(), "", err)
+					go errorLogger(g.Request.URL.String(), "9", err)
 				}
 			} else {
 				rows.Close()
 				cd.Error = "Could not get acceptor data"
-				go errorLogger(g.Request.URL.String(), "", err)
+				go errorLogger(g.Request.URL.String(), "10", err)
 			}
 
-			go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd))
+			go errorLogger(g.Request.URL.String(), "11", tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd))
 		})
 	})
 
@@ -314,9 +314,9 @@ func main() {
 
 	r.GET("/login", func(g *gin.Context) {
 		if isActiveSession(g.Request) {
-			go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "You're already logged in!"))
+			go errorLogger(g.Request.URL.String(), "1", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "You're already logged in!"))
 		} else {
-			go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil))
+			go errorLogger(g.Request.URL.String(), "2", tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil))
 		}
 	})
 
@@ -328,26 +328,26 @@ func main() {
 		err := db.QueryRow("SELECT * FROM PLAYERS WHERE email=$1", email).Scan(&ua.Email, &ua.Fname, &ua.Lname, &ua.Password, &ua.Score, &ua.ID)
 
 		if err == sql.ErrNoRows {
-			tpl.ExecuteTemplate(g.Writer, "login.gohtml", "BAD LOGIN!")
+			go errorLogger(g.Request.URL.String(), "1", tpl.ExecuteTemplate(g.Writer, "login.gohtml", "BAD LOGIN!"))
 		} else {
 			if err != nil {
-				go errorLogger(g.Request.URL.String(), "", err)
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "login.gohtml", "ERROR LOGGING IN!"))
+				go errorLogger(g.Request.URL.String(), "2", err)
+				go errorLogger(g.Request.URL.String(), "3", tpl.ExecuteTemplate(g.Writer, "login.gohtml", "ERROR LOGGING IN!"))
 			} else {
 				if checkPasswordHash(password, ua.Password) {
 					uid := getUUID()
 					http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", Value: uid})
 
 					_, err = db.Exec("INSERT INTO PLAYER_SESSIONS (pid, uuid) VALUES ($1, $2)", ua.ID, uid)
-					go errorLogger(g.Request.URL.String(), "", err)
+					go errorLogger(g.Request.URL.String(), "4", err)
 
 					players := users{}
 					err = queryPlayers(&players)
-					go errorLogger(g.Request.URL.String(), "", err)
+					go errorLogger(g.Request.URL.String(), "5", err)
 
-					go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "indexIn.gohtml", players))
+					go errorLogger(g.Request.URL.String(), "6", tpl.ExecuteTemplate(g.Writer, "indexIn.gohtml", players))
 				} else {
-					go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "login.gohtml", "BAD LOGIN!"))
+					go errorLogger(g.Request.URL.String(), "7", tpl.ExecuteTemplate(g.Writer, "login.gohtml", "BAD LOGIN!"))
 				}
 			}
 		}
@@ -356,15 +356,15 @@ func main() {
 	r.GET("/logout", func(g *gin.Context) {
 		if isActiveSession(g.Request) {
 			val, err := g.Request.Cookie("uuid")
-			go errorLogger(g.Request.URL.String(), "", err)
+			go errorLogger(g.Request.URL.String(), "1", err)
 
 			http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", MaxAge: -1})
 			_, err = db.Query("DELETE FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value)
-			go errorLogger(g.Request.URL.String(), "", err)
+			go errorLogger(g.Request.URL.String(), "2", err)
 
 			g.Redirect(307, "/")
 		} else {
-			go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil))
+			go errorLogger(g.Request.URL.String(), "3", tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil))
 		}
 	})
 
@@ -374,10 +374,10 @@ func main() {
 			player, err := queryPlayer(id)
 
 			if err != nil {
-				go errorBasicLogger(g.Request.URL.String(), "", err)
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "Error fetching your profile, sorry"))
+				go errorBasicLogger(g.Request.URL.String(), "1", err)
+				go errorLogger(g.Request.URL.String(), "2", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "Error fetching your profile, sorry"))
 			} else {
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "myProfile.gohtml", player))
+				go errorLogger(g.Request.URL.String(), "3", tpl.ExecuteTemplate(g.Writer, "myProfile.gohtml", player))
 			}
 		})
 	})
@@ -387,23 +387,23 @@ func main() {
 		if err == nil {
 			player, err := queryPlayer(id)
 			if err == sql.ErrNoRows {
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "That player ID does not exist"))
+				go errorLogger(g.Request.URL.String(), "1", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "That player ID does not exist"))
 			} else if err != nil {
-				go errorBasicLogger(g.Request.URL.String(), "", err)
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "Error finding player with that ID"))
+				go errorBasicLogger(g.Request.URL.String(), "2", err)
+				go errorLogger(g.Request.URL.String(), "3", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "Error finding player with that ID"))
 			} else if isActiveSession(g.Request) {
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "profileIn.gohtml", player))
+				go errorLogger(g.Request.URL.String(), "4", tpl.ExecuteTemplate(g.Writer, "profileIn.gohtml", player))
 			} else {
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "profileOut.gohtml", player))
+				go errorLogger(g.Request.URL.String(), "5", tpl.ExecuteTemplate(g.Writer, "profileOut.gohtml", player))
 			}
 		} else {
-			go errorBasicLogger(g.Request.URL.String(), "", err)
-			go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "That's not a valid player ID"))
+			go errorBasicLogger(g.Request.URL.String(), "6", err)
+			go errorLogger(g.Request.URL.String(), "7", tpl.ExecuteTemplate(g.Writer, "error.gohtml", "That's not a valid player ID"))
 		}
 	})
 
 	r.GET("/register", func(g *gin.Context) {
-		go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", nil))
+		go errorLogger(g.Request.URL.String(), "1", tpl.ExecuteTemplate(g.Writer, "register.gohtml", nil))
 	})
 
 	r.POST("/register", func(g *gin.Context) {
@@ -419,21 +419,21 @@ func main() {
 		}
 
 		if !matchEmail {
-			tpl.ExecuteTemplate(g.Writer, "register.gohtml", "EMAIL FORMAT IS INVALID!")
+			go errorLogger(g.Request.URL.String(), "2", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "EMAIL FORMAT IS INVALID!"))
 		} else {
 			fname := g.PostForm("fname")
 			lname := g.PostForm("lname")
 			password := g.PostForm("password")
 			cpassword := g.PostForm("cpassword")
 			if cpassword != password {
-				go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "PASSWORDS DO NOT MATCH!"))
+				go errorLogger(g.Request.URL.String(), "3", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "PASSWORDS DO NOT MATCH!"))
 			} else {
 				ua := userAuth{}
 				err := db.QueryRow("SELECT email FROM PLAYERS WHERE email=$1", email).Scan(&ua.Email)
 
 				if err != sql.ErrNoRows {
-					go errorLogger(g.Request.URL.String(), "", err)
-					go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "USER ALREADY EXISTS!"))
+					go errorLogger(g.Request.URL.String(), "4", err)
+					go errorLogger(g.Request.URL.String(), "5", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "USER ALREADY EXISTS!"))
 				} else {
 					var hpassword string
 					for hpassword, err = hashPassword(password); err != nil; {
@@ -444,15 +444,15 @@ func main() {
 					_, err = db.Exec("INSERT INTO PLAYER_CONFIRMATION VALUES ($1, $2, $3, $4, $5)",
 						uid, email, fname, lname, hpassword)
 					if err != nil {
-						go errorBasicLogger(g.Request.URL.String(), "", err)
-						go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with adding to registration pool, try again; if the problem persists, you know who to talk to"))
+						go errorBasicLogger(g.Request.URL.String(), "6", err)
+						go errorLogger(g.Request.URL.String(), "7", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with adding to registration pool, try again; if the problem persists, you know who to talk to"))
 					} else {
 						_, _, err = mg.Send(mailgun.NewMessage("robot@mail.therileyjohnson.com", "Registration", fmt.Sprintf("Click %s:4800/register/%s to confirm your email!", url, uid), email))
 						if err != nil {
-							go errorBasicLogger(g.Request.URL.String(), "", err)
-							go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with sending confirmation email for registration, try again; if the problem persists, you know who to talk to"))
+							go errorBasicLogger(g.Request.URL.String(), "8", err)
+							go errorLogger(g.Request.URL.String(), "9", tpl.ExecuteTemplate(g.Writer, "register.gohtml", "Error with sending confirmation email for registration, try again; if the problem persists, you know who to talk to"))
 						} else {
-							go errorLogger(g.Request.URL.String(), "", tpl.ExecuteTemplate(g.Writer, "registerFinishOut.gohtml", "Please confirm your email to finish registration"))
+							go errorLogger(g.Request.URL.String(), "10", tpl.ExecuteTemplate(g.Writer, "registerFinishOut.gohtml", "Please confirm your email to finish registration"))
 						}
 					}
 				}
@@ -463,26 +463,28 @@ func main() {
 	r.GET("/register/:id", func(g *gin.Context) {
 		u := user{}
 		err := db.QueryRow(
-			`SELECT email, fname, lname, password FROM PLAYER_CONFIRMATION WHERE uuid=$1`,
-			g.Param("id"),
+			`SELECT 
+			email, fname, lname, password 
+			FROM PLAYER_CONFIRMATION 
+			WHERE uuid=$1`, g.Param("id"),
 		).Scan(
 			&u.Email, &u.Fname, &u.Lname, &u.Password,
 		)
 
 		if err == sql.ErrNoRows {
-			tpl.ExecuteTemplate(g.Writer, "registrationBad.gohtml", nil)
+			go errorLogger(g.Request.URL.String(), "1", tpl.ExecuteTemplate(g.Writer, "registrationBad.gohtml", nil))
 		} else {
-			go errorLogger(g.Request.URL.String(), "", err)
+			go errorLogger(g.Request.URL.String(), "2", err)
 			addPlayer(u.Email, u.Fname, u.Lname, u.Password)
 			db.QueryRow(`SELECT pid FROM PLAYERS WHERE email=$1`, u.Email).Scan(&u.ID)
 			uid := getUUID()
 			http.SetCookie(g.Writer, &http.Cookie{Name: "uuid", Value: uid})
-			tpl.ExecuteTemplate(g.Writer, "registerFinishIn.gohtml", "You have finished registration!")
+			go errorLogger(g.Request.URL.String(), "3", tpl.ExecuteTemplate(g.Writer, "registerFinishIn.gohtml", "You have finished registration!"))
 
 			_, err = db.Exec(`DELETE FROM PLAYER_CONFIRMATION WHERE email=$1`, u.Email)
-			go errorLogger(g.Request.URL.String(), "", err)
+			go errorLogger(g.Request.URL.String(), "4", err)
 			_, err = db.Exec(`INSERT INTO PLAYER_SESSIONS VALUES ($1, $2)`, u.ID, uid)
-			go errorLogger(g.Request.URL.String(), "", err)
+			go errorLogger(g.Request.URL.String(), "5", err)
 		}
 	})
 
@@ -528,9 +530,11 @@ func addChallenge(c *gin.Context) error {
 }
 
 func addPlayer(e, f, l, p string) error {
+	funcLocation := "addPlayer"
 	_, err := db.Exec(`INSERT INTO PLAYERS VALUES ($1, $2, $3, $4, 300)`, e, f, l, p)
 
 	if err != nil {
+		go errorBasicLogger(funcLocation, "1", err)
 		return err
 	}
 
@@ -587,7 +591,12 @@ func errorLogger(location, sublocation string, err error) {
 func getIDFromSession(r *http.Request) uint64 {
 	var id uint64
 	val, _ := r.Cookie("uuid")
-	db.QueryRow("SELECT pid FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value).Scan(&id)
+	db.QueryRow(`
+		SELECT 
+		pid 
+		FROM PLAYER_SESSIONS 
+		WHERE uuid=$1`, val.Value,
+	).Scan(&id)
 	return id
 }
 
@@ -606,21 +615,32 @@ func hashPassword(password string) (string, error) {
 }
 
 func isActiveSession(r *http.Request) bool {
+	funcLocation := "isActiveSession"
 	val, err := r.Cookie("uuid")
 	var id int
-	return err == nil && db.QueryRow("SELECT pid FROM PLAYER_SESSIONS WHERE uuid=$1", val.Value).Scan(&id) != sql.ErrNoRows
+	err = db.QueryRow(`
+		SELECT 
+		pid 
+		FROM PLAYER_SESSIONS 
+		WHERE uuid=$1`, val.Value,
+	).Scan(&id)
+	if err != sql.ErrNoRows {
+		if err != nil {
+			return true
+		}
+		go errorBasicLogger(funcLocation, "1", err)
+	}
+	return false
 }
 
 func queryPlayer(id uint64) (user, error) {
-	row := db.QueryRow(`
+	u := user{}
+
+	err := db.QueryRow(`
 		SELECT 
 		email, fname, lname, pid, score 
 		FROM PLAYERS WHERE pid=$1`, id,
-	)
-
-	u := user{}
-
-	err := row.Scan(
+	).Scan(
 		&u.Email, &u.Fname, &u.Lname, &u.ID, &u.Score,
 	)
 
@@ -636,20 +656,19 @@ func queryPlayer(id uint64) (user, error) {
 }
 
 func queryPlayers(U *users) error {
+	funcLocation := "queryPlayers"
 	//Order by descending because the
 	//ordering is reversed when
 	//appended to the U.Users list
 	rows, err := db.Query(`
 		SELECT
-			email,
-			fname,
-			lname,
-			pid,
-			score
+		email, fname, lname, pid, score
 		FROM PLAYERS
-		ORDER BY score DESC`)
+		ORDER BY score DESC`,
+	)
 
 	if err != nil {
+		go errorBasicLogger(funcLocation, "1", err)
 		return err
 	}
 
@@ -665,6 +684,7 @@ func queryPlayers(U *users) error {
 			&u.Score,
 		)
 		if err != nil {
+			go errorBasicLogger(funcLocation, "2", err)
 			return err
 		}
 		U.Users = append(U.Users, u)
@@ -673,6 +693,7 @@ func queryPlayers(U *users) error {
 	err = rows.Err()
 
 	if err != nil {
+		go errorBasicLogger(funcLocation, "3", err)
 		return err
 	}
 
