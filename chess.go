@@ -38,9 +38,11 @@ type challenge struct {
 }
 
 type confirmData struct {
+	Initiator   user
 	Error       string
 	Achallenges []challenge
 	Ichallenges []challenge
+	users
 }
 
 type locationalError struct {
@@ -93,7 +95,7 @@ func init() {
 }
 
 func main() {
-	errorDrain()
+	go errorDrain()
 
 	r := gin.Default()
 	tpl = template.Must(template.New("").ParseGlob("data/templates/*.gohtml"))
@@ -112,7 +114,7 @@ func main() {
 	/* ROUTE HANDLERS */
 	r.GET("/", func(g *gin.Context) {
 		players := users{}
-		err := queryPlayers(&players)
+		err := queryPlayersByScore(&players)
 		go errorLogger(g.Request.URL.String(), "1", err)
 		if isActiveSession(g.Request) {
 			err = tpl.ExecuteTemplate(g.Writer, "indexIn.gohtml", players)
@@ -190,6 +192,7 @@ func main() {
 		checkAuth(c, func(g *gin.Context) {
 			type info struct{ Fname, Lname string }
 
+			var err error
 			var oid uint64
 			var u user
 
@@ -198,47 +201,15 @@ func main() {
 			pid := getIDFromSession(g.Request)
 			pmap := make(map[string]info)
 
-			rows, err := db.Query(`SELECT * FROM PLAYER_CHALLENGES WHERE acceptor=$1`, pid)
-			go errorLogger(g.Request.URL.String(), "1", err)
+			cd.Initiator, err = queryPlayer(pid)
+
 			if err == nil {
-				for rows.Next() && cd.Error == "" {
-					c = challenge{}
-					err = rows.Scan(
-						&c.ID,
-						&c.Date,
-						&c.Acceptor,
-						&c.Initiator,
-						&c.Winner,
-					)
-
-					if err != nil {
-						cd.Error = "Error in getting acceptor data"
-						go errorLogger(g.Request.URL.String(), "2", err)
-					} else {
-						if _, exists := pmap[c.Initiator]; !exists {
-							oid, err = strconv.ParseUint(c.Initiator, 10, 32)
-							go errorLogger(g.Request.URL.String(), "3", err)
-							u, err = queryPlayer(oid)
-							go errorLogger(g.Request.URL.String(), "4", err)
-							pmap[c.Initiator] = info{u.Fname, u.Lname}
-						}
-
-						c.Opponent.Fname, c.Opponent.Lname = pmap[c.Initiator].Fname, pmap[c.Initiator].Lname
-
-						if c.Initiator == c.Winner {
-							c.WinningString = "won on"
-						} else {
-							c.WinningString = "lost on"
-						}
-
-						cd.Achallenges = append(cd.Achallenges, c)
-					}
-				}
-				rows.Close()
-
+				err = queryPlayersByFname(&cd.users, pid)
 				if err == nil {
-					rows, err = db.Query(`SELECT * FROM PLAYER_CHALLENGES WHERE initiator=$1`, pid)
+					rows, err := db.Query(`SELECT * FROM PLAYER_CHALLENGES WHERE acceptor=$1`, pid)
+					go errorLogger(g.Request.URL.String(), "1", err)
 					if err == nil {
+						fmt.Println(cd.Users)
 						for rows.Next() && cd.Error == "" {
 							c = challenge{}
 							err = rows.Scan(
@@ -251,41 +222,87 @@ func main() {
 
 							if err != nil {
 								cd.Error = "Error in getting acceptor data"
-								go errorLogger(g.Request.URL.String(), "5", err)
+								go errorLogger(g.Request.URL.String(), "2", err)
 							} else {
-								if _, exists := pmap[c.Acceptor]; !exists {
-									oid, err = strconv.ParseUint(c.Acceptor, 10, 32)
-									go errorLogger(g.Request.URL.String(), "6", err)
+								if _, exists := pmap[c.Initiator]; !exists {
+									oid, err = strconv.ParseUint(c.Initiator, 10, 32)
+									go errorLogger(g.Request.URL.String(), "3", err)
 									u, err = queryPlayer(oid)
-									go errorLogger(g.Request.URL.String(), "7", err)
-									pmap[c.Acceptor] = info{u.Fname, u.Lname}
+									go errorLogger(g.Request.URL.String(), "4", err)
+									pmap[c.Initiator] = info{u.Fname, u.Lname}
 								}
 
-								c.Opponent.Fname, c.Opponent.Lname = pmap[c.Acceptor].Fname, pmap[c.Acceptor].Lname
+								c.Opponent.Fname, c.Opponent.Lname = pmap[c.Initiator].Fname, pmap[c.Initiator].Lname
 
-								if c.Acceptor == c.Winner {
+								if c.Initiator == c.Winner {
 									c.WinningString = "won on"
 								} else {
 									c.WinningString = "lost on"
 								}
 
-								cd.Ichallenges = append(cd.Ichallenges, c)
+								cd.Achallenges = append(cd.Achallenges, c)
 							}
 						}
+						rows.Close()
+
+						if err == nil {
+							rows, err = db.Query(`SELECT * FROM PLAYER_CHALLENGES WHERE initiator=$1`, pid)
+							if err == nil {
+								for rows.Next() && cd.Error == "" {
+									c = challenge{}
+									err = rows.Scan(
+										&c.ID,
+										&c.Date,
+										&c.Acceptor,
+										&c.Initiator,
+										&c.Winner,
+									)
+
+									if err != nil {
+										cd.Error = "Error in getting acceptor data"
+										go errorLogger(g.Request.URL.String(), "5", err)
+									} else {
+										if _, exists := pmap[c.Acceptor]; !exists {
+											oid, err = strconv.ParseUint(c.Acceptor, 10, 32)
+											go errorLogger(g.Request.URL.String(), "6", err)
+											u, err = queryPlayer(oid)
+											go errorLogger(g.Request.URL.String(), "7", err)
+											pmap[c.Acceptor] = info{u.Fname, u.Lname}
+										}
+
+										c.Opponent.Fname, c.Opponent.Lname = pmap[c.Acceptor].Fname, pmap[c.Acceptor].Lname
+
+										if c.Acceptor == c.Winner {
+											c.WinningString = "won on"
+										} else {
+											c.WinningString = "lost on"
+										}
+
+										cd.Ichallenges = append(cd.Ichallenges, c)
+									}
+								}
+							} else {
+								go errorLogger(g.Request.URL.String(), "8", err)
+							}
+							rows.Close()
+						} else {
+							go errorLogger(g.Request.URL.String(), "9", err)
+						}
 					} else {
-						go errorLogger(g.Request.URL.String(), "8", err)
+						rows.Close()
+						cd.Error = "Could not get acceptor data"
+						go errorLogger(g.Request.URL.String(), "10", err)
 					}
-					rows.Close()
 				} else {
-					go errorLogger(g.Request.URL.String(), "9", err)
+					cd.Error = "Could not get player ID data"
+					errorLogger(g.Request.URL.String(), "11", err)
 				}
 			} else {
-				rows.Close()
-				cd.Error = "Could not get acceptor data"
-				go errorLogger(g.Request.URL.String(), "10", err)
+				cd.Error = "Could not get initiator data"
+				errorLogger(g.Request.URL.String(), "12", err)
 			}
 
-			go errorLogger(g.Request.URL.String(), "11", tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd))
+			go errorLogger(g.Request.URL.String(), "13", tpl.ExecuteTemplate(g.Writer, "gameConfirm.gohtml", cd))
 		})
 	})
 
@@ -342,7 +359,7 @@ func main() {
 					go errorLogger(g.Request.URL.String(), "4", err)
 
 					players := users{}
-					err = queryPlayers(&players)
+					err = queryPlayersByScore(&players)
 					go errorLogger(g.Request.URL.String(), "5", err)
 
 					go errorLogger(g.Request.URL.String(), "6", tpl.ExecuteTemplate(g.Writer, "indexIn.gohtml", players))
@@ -494,6 +511,11 @@ func main() {
 func addChallenge(c *gin.Context) error {
 	pid := getIDFromSession(c.Request)
 	oid, err := strconv.ParseUint(c.PostForm("pid"), 10, 32)
+
+	if oid == 0 {
+		return fmt.Errorf("Need to select a user")
+	}
+
 	if err != nil {
 		return fmt.Errorf("Couldn't parse Opponent ID")
 	}
@@ -618,14 +640,16 @@ func isActiveSession(r *http.Request) bool {
 	funcLocation := "isActiveSession"
 	val, err := r.Cookie("uuid")
 	var id int
+
 	err = db.QueryRow(`
 		SELECT 
 		pid 
 		FROM PLAYER_SESSIONS 
 		WHERE uuid=$1`, val.Value,
 	).Scan(&id)
+
 	if err != sql.ErrNoRows {
-		if err != nil {
+		if err == nil {
 			return true
 		}
 		go errorBasicLogger(funcLocation, "1", err)
@@ -655,8 +679,54 @@ func queryPlayer(id uint64) (user, error) {
 	return u, nil
 }
 
-func queryPlayers(U *users) error {
-	funcLocation := "queryPlayers"
+func queryPlayersByFname(U *users, Cuser uint64) error {
+	funcLocation := "queryPlayersByScore"
+	//Order by descending because the
+	//ordering is reversed when
+	//appended to the U.Users list
+	rows, err := db.Query(`
+		SELECT
+		email, fname, lname, pid, score
+		FROM PLAYERS
+		WHERE NOT pid=$1
+		ORDER BY fname`, Cuser,
+	)
+
+	if err != nil {
+		go errorBasicLogger(funcLocation, "1", err)
+		return err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		u := user{}
+		err = rows.Scan(
+			&u.Email,
+			&u.Fname,
+			&u.Lname,
+			&u.ID,
+			&u.Score,
+		)
+		if err != nil {
+			go errorBasicLogger(funcLocation, "2", err)
+			return err
+		}
+		U.Users = append(U.Users, u)
+	}
+
+	err = rows.Err()
+
+	if err != nil {
+		go errorBasicLogger(funcLocation, "3", err)
+		return err
+	}
+
+	return nil
+}
+
+func queryPlayersByScore(U *users) error {
+	funcLocation := "queryPlayersByScore"
 	//Order by descending because the
 	//ordering is reversed when
 	//appended to the U.Users list
