@@ -639,20 +639,22 @@ func hashPassword(password string) (string, error) {
 func isActiveSession(r *http.Request) bool {
 	funcLocation := "isActiveSession"
 	val, err := r.Cookie("uuid")
-	var id int
+	if err == nil {
+		var id int
 
-	err = db.QueryRow(`
+		err = db.QueryRow(`
 		SELECT 
 		pid 
 		FROM PLAYER_SESSIONS 
 		WHERE uuid=$1`, val.Value,
-	).Scan(&id)
+		).Scan(&id)
 
-	if err != sql.ErrNoRows {
-		if err == nil {
-			return true
+		if err != sql.ErrNoRows {
+			if err == nil {
+				return true
+			}
+			go errorBasicLogger(funcLocation, "1", err)
 		}
-		go errorBasicLogger(funcLocation, "1", err)
 	}
 	return false
 }
