@@ -105,10 +105,7 @@ func main() {
 	mg := mailgun.NewMailgun("mail.therileyjohnson.com", private, public)
 
 	/* FILE HANDLERS */
-	r.GET("/static/css/:fi", static.Serve("/static/css", static.LocalFile("static/css/", true)))
-	r.GET("/static/img/:fi", static.Serve("/static/img", static.LocalFile("static/img/", true)))
-	r.GET("/static/js/:fi", static.Serve("/static/js", static.LocalFile("static/js/", true)))
-	r.GET("/static/custom/:fi", static.Serve("/static/custom", static.LocalFile("static/custom/", true)))
+	r.Use(static.Serve("/static", static.LocalFile("static/", true)))
 	r.GET("/favicon.ico", func(g *gin.Context) { http.ServeFile(g.Writer, g.Request, "/static/img/favicon.ico") })
 
 	/* ROUTE HANDLERS */
