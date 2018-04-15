@@ -355,11 +355,7 @@ func main() {
 					_, err = db.Exec("INSERT INTO PLAYER_SESSIONS (pid, uuid) VALUES ($1, $2)", ua.ID, uid)
 					go errorLogger(g.Request.URL.String(), "4", err)
 
-					players := users{}
-					err = queryPlayersByScore(&players)
-					go errorLogger(g.Request.URL.String(), "5", err)
-
-					go errorLogger(g.Request.URL.String(), "6", tpl.ExecuteTemplate(g.Writer, "indexIn.gohtml", players))
+					g.Redirect(303, "/")
 				} else {
 					go errorLogger(g.Request.URL.String(), "7", tpl.ExecuteTemplate(g.Writer, "login.gohtml", "BAD LOGIN!"))
 				}

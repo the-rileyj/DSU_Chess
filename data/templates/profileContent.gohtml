@@ -1,19 +1,25 @@
 {{define "profileContent"}}
-    <div class="container-fluid" style="padding-left: 1rem">
-        <div class="row" style="margin-top: 1rem">
-            <div class="col">
+<div class="theme-text-alt">
+    <div class="row">
+        <div class="col">
+            <p>
                 {{.Fname}} {{.Lname}} - ID: {{.ID}}
-            </div>
-        </div>
-        <div class="row">
-            <div class="col">
-                Score: {{.Score}}
-            </div>
-        </div>
-        <div class="row">
-            <div class="col">
-                Email: {{.Email}}
-            </div>
+            </p>
         </div>
     </div>
+    <div class="row">
+        <div class="col">
+            <p>
+                Score: {{.Score}}
+            </p>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <p>
+                Email: {{.Email}}
+            </p>
+        </div>
+    </div>
+</div>
 {{end}}
