@@ -2,7 +2,7 @@
     {{template "head"}}
     <body>
         {{template "navIn"}}
-        <div class="container-fluid elevation-8 content-container theme-bg-alt pa-1 mx-1 theme-border-alt  theme-text-highlighter">
+        <div class="container-fluid content-container theme-bg-alt pa-2 mx-1 theme-border-alt theme-text-highlighter">
             {{if .Error}}
                 <div class="text-center">
                     <h1 style="color: red">{{.}}</h1>
@@ -14,7 +14,7 @@
                         Opponent
                     </div>
                     <div class="col-sm-6">
-                        <select name="pid" id="pid">
+                        <select class="theme-input" name="pid" id="pid">
                             <option value="0">
                                 Select a user
                             </option>
@@ -31,7 +31,7 @@
                         Winner
                     </div>
                     <div class="col-sm-6">
-                        <select name="wpid" id="wpid">
+                        <select class="theme-input" name="wpid" id="wpid">
                             <option value="0">
                                 Select a user
                             </option>
@@ -46,7 +46,7 @@
                         Date of Game
                     </label>
                     <div class="col-sm-10">
-                        <input type="date" class="form-control" id="inputDate" name="date" placeholder="Date">
+                        <input type="date" class="form-control theme-input" id="inputDate" name="date" placeholder="Date">
                     </div>
                 </div>
                 <div class="form-group row">
