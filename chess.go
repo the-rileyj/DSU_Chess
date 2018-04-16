@@ -109,6 +109,10 @@ func main() {
 	r.GET("/favicon.ico", func(g *gin.Context) { http.ServeFile(g.Writer, g.Request, "/static/img/favicon.ico") })
 
 	/* ROUTE HANDLERS */
+	r.NoRoute(func(c *gin.Context) {
+		tpl.ExecuteTemplate(c.Writer, "error.gohtml", "404 Page not found :(")
+	})
+
 	r.GET("/", func(g *gin.Context) {
 		players := users{}
 		err := queryPlayersByScore(&players)
@@ -374,7 +378,7 @@ func main() {
 
 			g.Redirect(307, "/")
 		} else {
-			go errorLogger(g.Request.URL.String(), "3", tpl.ExecuteTemplate(g.Writer, "login.gohtml", nil))
+			g.Redirect(303, "/login")
 		}
 	})
 
