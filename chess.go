@@ -95,6 +95,8 @@ func init() {
 }
 
 func main() {
+	errorChannel = make(chan locationalError)
+
 	go errorDrain()
 
 	r := gin.Default()
